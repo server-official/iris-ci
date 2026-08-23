@@ -1,0 +1,138 @@
+name: Build tracker feed and deploy Worker
+
+on:
+  repository_dispatch:
+    types: [trigger-tle-update]   # fired by the Worker's own Cloudflare Cron Trigger (worker/index.js scheduled()) -- see SETUP.md. Not using GitHub's `schedule:` here: it's commonly delayed under platform load and gets silently disabled after 60 days of repo inactivity.
+  workflow_dispatch:
+    inputs:
+      backfill_history:
+        description: "Force Wayback historical TLE backfill (slow, only needed once per new N2YO satellite)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # to push refreshed pipeline state back to the PRIVATE repo
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout the PUBLIC repo (this repo -- just the workflow itself).
+      - name: Checkout public repo
+        uses: actions/checkout@v4
+        with:
+          path: public
+
+      # 2. Checkout the PRIVATE repo into a sibling folder, authenticated
+      #    with a fine-grained PAT stored as a secret in THIS (public) repo.
+      #    This is where the sensitive pipeline source AND the dashboard
+      #    site source (export/, site/, worker/) all actually live -- none
+      #    of it is ever committed to this public repo's git history. It
+      #    exists only in this job's ephemeral runner filesystem.
+      - name: Checkout private repo (sensitive tracker source + site + worker)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}     # e.g. "your-org/si-private"
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: private
+          persist-credentials: true   # needed so step 6 can push back with the same token
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        working-directory: private
+        run: pip install -r requirements.txt
+
+      # 3. Run the actual sensitive pipeline -- USING THIS REPO'S (public,
+      #    free) Actions minutes, not the private repo's.
+      - name: Fetch current N2YO TLE data
+        working-directory: private
+        env:
+          N2YO_API_KEY: ${{ secrets.N2YO_API_KEY }}
+        run: python fetch_tle.py
+
+      - name: Run RPO analysis pipeline
+        working-directory: private
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ "${{ github.event.inputs.backfill_history }}" = "true" ]; then
+            python pipeline/run_pipeline.py --backfill-history
+          else
+            python pipeline/run_pipeline.py
+          fi
+
+      # 4. Build the sanitized export and drop it straight into the site
+      #    bundle that the Worker will serve post-authentication.
+      - name: Export sanitized public_data.json
+        working-directory: private
+        run: |
+          python export/export_public_data.py
+          mkdir -p site/data
+          cp export/out/public_data.json site/data/public_data.json
+
+      # 5. Persist the private repo's refreshed state (TLE logs, output/,
+      #    rpo_updates.csv, satellites.csv ranking) back to the PRIVATE
+      #    repo, so the next run has continuity. This is a plain git push,
+      #    NOT a workflow trigger -- it does not consume private Actions
+      #    minutes as long as the private repo's own workflow no longer
+      #    listens on `push` (see SETUP.md, step 2).
+      - name: Commit and push updated state to the private repo
+        working-directory: private
+        run: |
+          git config user.name "tracker-bot"
+          git config user.email "tracker-bot@users.noreply.github.com"
+          git add satellites.csv tle_data/ update_log.txt n2yo_history/ \
+                   data/ output/ rpo_updates.csv
+          if git diff --staged --quiet; then
+            echo "No pipeline state changes to commit."
+          else
+            git commit -m "Update TLE data + RPO analysis [automated, via public-repo runner]"
+            git push
+          fi
+
+      # 6. Deploy the Worker (worker/index.js + the site/ bundle it gates)
+      #    straight from the checked-out private repo. The dashboard's
+      #    HTML/CSS/JS is uploaded to Cloudflare as the Worker's static
+      #    asset bundle -- it is never committed anywhere public, and
+      #    Cloudflare only serves it back out through worker/index.js's
+      #    auth check, never directly.
+      - name: Install wrangler
+        working-directory: private/worker
+        run: npm install
+
+      - name: Deploy Worker to Cloudflare
+        working-directory: private/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      # 7. Keep the Worker's auth + dispatch secrets in sync with the
+      #    GitHub secrets that own them, so changing SITE_PASSWORD (or
+      #    rotating GH_DISPATCH_PAT) in this repo's Settings is the whole
+      #    workflow -- wrangler secret put is idempotent, safe every run.
+      - name: Sync secrets to the Worker
+        working-directory: private/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GH_DISPATCH_PAT: ${{ secrets.GH_DISPATCH_PAT }}
+        run: |
+          printf '%s' "$SITE_PASSWORD" | sha256sum | awk '{print $1}' | npx wrangler secret put SITE_PASSWORD_SHA256
+          printf '%s' "$SESSION_SECRET" | npx wrangler secret put SESSION_SECRET
+          printf '%s' "$GH_DISPATCH_PAT" | npx wrangler secret put GH_DISPATCH_PAT
