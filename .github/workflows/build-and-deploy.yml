@@ -78,6 +78,8 @@ jobs:
       #    bundle that the Worker will serve post-authentication.
       - name: Export sanitized public_data.json
         working-directory: private
+        env:
+          N2YO_API_KEY: ${{ secrets.N2YO_API_KEY }}
         run: |
           python export/export_public_data.py
           mkdir -p site/data
