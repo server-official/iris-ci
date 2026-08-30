@@ -1,5 +1,4 @@
 name: Build tracker feed and deploy Worker
-
 on:
   repository_dispatch:
     types: [trigger-tle-update]   # fired by the Worker's own Cloudflare Cron Trigger (worker/index.js scheduled()) -- see SETUP.md. Not using GitHub's `schedule:` here: it's commonly delayed under platform load and gets silently disabled after 60 days of repo inactivity.
@@ -9,14 +8,11 @@ on:
         description: "Force Wayback historical TLE backfill (slow, only needed once per new N2YO satellite)"
         type: boolean
         default: false
-
 permissions:
   contents: write   # to push refreshed pipeline state back to the PRIVATE repo
-
 concurrency:
   group: deploy
   cancel-in-progress: false
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -26,7 +22,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: public
-
       # 2. Checkout the PRIVATE repo into a sibling folder, authenticated
       #    with a fine-grained PAT stored as a secret in THIS (public) repo.
       #    This is where the sensitive pipeline source AND the dashboard
@@ -40,21 +35,17 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: private
           persist-credentials: true   # needed so step 6 can push back with the same token
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install Python dependencies
         working-directory: private
         run: pip install -r requirements.txt
-
       # 3. Run the actual sensitive pipeline -- USING THIS REPO'S (public,
       #    free) Actions minutes, not the private repo's.
       - name: Fetch current N2YO TLE data
@@ -62,7 +53,6 @@ jobs:
         env:
           N2YO_API_KEY: ${{ secrets.N2YO_API_KEY }}
         run: python fetch_tle.py
-
       - name: Run RPO analysis pipeline
         working-directory: private
         env:
@@ -73,7 +63,6 @@ jobs:
           else
             python pipeline/run_pipeline.py
           fi
-
       # 4. Build the sanitized export and drop it straight into the site
       #    bundle that the Worker will serve post-authentication.
       - name: Export sanitized public_data.json
@@ -84,7 +73,15 @@ jobs:
           python export/export_public_data.py
           mkdir -p site/data
           cp export/out/public_data.json site/data/public_data.json
-
+          # export_public_data.py also writes one small history file per
+          # satellite under export/out/history/ (site/js/panels.js's
+          # showGraphs() fetches these lazily, on demand, only when a
+          # satellite's RPO graph modal is opened -- see loadHistory() in
+          # site/js/data.js). Without this copy, every one of those fetches
+          # 404s against the Worker's static asset bundle, since only
+          # public_data.json itself was ever being deployed.
+          rm -rf site/data/history
+          cp -r export/out/history site/data/history
       # 5. Persist the private repo's refreshed state (TLE logs, output/,
       #    rpo_updates.csv, satellites.csv ranking) back to the PRIVATE
       #    repo, so the next run has continuity. This is a plain git push,
@@ -104,7 +101,6 @@ jobs:
             git commit -m "Update TLE data + RPO analysis [automated, via public-repo runner]"
             git push
           fi
-
       # 6. Deploy the Worker (worker/index.js + the site/ bundle it gates)
       #    straight from the checked-out private repo. The dashboard's
       #    HTML/CSS/JS is uploaded to Cloudflare as the Worker's static
@@ -114,14 +110,12 @@ jobs:
       - name: Install wrangler
         working-directory: private/worker
         run: npm install
-
       - name: Deploy Worker to Cloudflare
         working-directory: private/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
-
       # 7. Keep the Worker's auth + dispatch secrets in sync with the
       #    GitHub secrets that own them, so changing SITE_PASSWORD (or
       #    rotating GH_DISPATCH_PAT) in this repo's Settings is the whole
