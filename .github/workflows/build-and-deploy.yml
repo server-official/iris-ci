@@ -72,7 +72,6 @@ jobs:
           SPACETRACK_USER: ${{ secrets.SPACETRACK_USER }}
           SPACETRACK_PASS: ${{ secrets.SPACETRACK_PASS }}
         run: |
-          echo "user length: ${#SPACETRACK_USER}, pass length: ${#SPACETRACK_PASS}"
           python export/export_public_data.py
           mkdir -p site/data
           cp export/out/public_data.json site/data/public_data.json
