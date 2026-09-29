@@ -75,6 +75,7 @@ jobs:
           python export/export_public_data.py
           mkdir -p site/data
           cp export/out/public_data.json site/data/public_data.json
+          cp export/out/early_warning_history.json site/data/early_warning_history.json
           # export_public_data.py also writes one small history file per
           # satellite under export/out/history/ (site/js/panels.js's
           # showGraphs() fetches these lazily, on demand, only when a
