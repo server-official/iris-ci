@@ -99,13 +99,7 @@ jobs:
       #     state lives in data/ew_notified.json, committed by step 5 below
       #     (it already `git add`s data/), so each manoeuvre alerts once.
       #     continue-on-error: a Telegram hiccup must never block the deploy.
-      - name: Telegram test
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" -d text="Hi! I am the IRIS ALERTS bot. This is a test."
+       
       - name: Early Warning manoeuvre notifications (Telegram)
         working-directory: private
         continue-on-error: true
