@@ -88,6 +88,24 @@ jobs:
           # public_data.json itself was ever being deployed.
           rm -rf site/data/history
           cp -r export/out/history site/data/history
+      # 4b. EARLY WARNING manoeuvre watch: for each GEO satellite of interest,
+      #     look at the satellites within 1 deg longitude of it (the YELLOW
+      #     tripline) and, if any has a freshly confirmed RPO manoeuvre
+      #     (same ar/rpo_adaptive.py detections as the rest of IRIS), send a
+      #     Telegram message via iris-telebot. Needs two repo secrets:
+      #       TELEGRAM_BOT_TOKEN  (iris-telebot's token from @BotFather)
+      #       TELEGRAM_CHAT_ID    (target chat/channel id; comma-separate several)
+      #     Without them it just prints what it would have sent. Sent-alert
+      #     state lives in data/ew_notified.json, committed by step 5 below
+      #     (it already `git add`s data/), so each manoeuvre alerts once.
+      #     continue-on-error: a Telegram hiccup must never block the deploy.
+      - name: Early Warning manoeuvre notifications (Telegram)
+        working-directory: private
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python export/early_warning_notify.py
       # 5. Persist the private repo's refreshed state (TLE logs, output/,
       #    rpo_updates.csv, satellites.csv ranking) back to the PRIVATE
       #    repo, so the next run has continuity. This is a plain git push,
