@@ -88,6 +88,18 @@ jobs:
           # public_data.json itself was ever being deployed.
           rm -rf site/data/history
           cp -r export/out/history site/data/history
+      # 4a. GNSS INTERFERENCE datasets (gpsjam.org ADS-B, NOAA GloTEC, SWPC space weather, Space-Track GNSS TLEs).
+      #     Writes site/data/gnss/ (incrementally -- only new days / frames are fetched; the first run backfills the
+      #     whole gpsjam archive).  Each source is isolated inside `python -m gnss.run`, so one provider being down
+      #     never blocks the deploy.  continue-on-error: the other modes must always ship.
+      - name: Build GNSS interference datasets
+        working-directory: private
+        continue-on-error: true
+        env:
+          SPACETRACK_USER: ${{ secrets.SPACETRACK_USER }}
+          SPACETRACK_PASS: ${{ secrets.SPACETRACK_PASS }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m gnss.run
       # 4b. EARLY WARNING manoeuvre watch: for each GEO satellite of interest,
       #     look at the satellites within 1 deg longitude of it (the YELLOW
       #     tripline) and, if any has a freshly confirmed RPO manoeuvre
@@ -119,7 +131,7 @@ jobs:
           git config user.name "tracker-bot"
           git config user.email "tracker-bot@users.noreply.github.com"
           git add satellites.csv tle_data/ update_log.txt n2yo_history/ \
-                   data/ output/ rpo_updates.csv
+                   data/ output/ rpo_updates.csv site/data/gnss/
           if git diff --staged --quiet; then
             echo "No pipeline state changes to commit."
           else
