@@ -76,6 +76,7 @@ jobs:
           mkdir -p site/data
           cp export/out/public_data.json site/data/public_data.json
           cp export/out/early_warning_history.json site/data/early_warning_history.json
+          cp export/out/early_warning_conjunctions.json site/data/early_warning_conjunctions.json
           echo "===== EARLY WARNING HISTORY ====="
           cat export/out/early_warning_history.json
           echo "================================="
@@ -107,8 +108,10 @@ jobs:
       #     Telegram message via iris-telebot. Needs two repo secrets:
       #       TELEGRAM_BOT_TOKEN  (iris-telebot's token from @BotFather)
       #       TELEGRAM_CHAT_ID    (target chat/channel id; comma-separate several)
-      #     Without them it just prints what it would have sent. Sent-alert
-      #     state lives in data/ew_notified.json, committed by step 5 below
+      #     Without them it just prints what it would have sent.
+      #     (LEO satellites of interest are reported from Space-Track conjunction
+      #     data -- POC / TCA -- not longitude; see export/early_warning_conjunctions.py.)
+      #     Sent-alert state lives in data/ew_notified.json, committed by step 5 below
       #     (it already `git add`s data/), so each manoeuvre alerts once.
       #     continue-on-error: a Telegram hiccup must never block the deploy.
        
