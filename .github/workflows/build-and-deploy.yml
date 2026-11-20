@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       styles_only:
-        description: "Styles/UI only: skip the data refresh (TLE fetch, RPO pipeline, GNSS, Telegram alerts, git push) and just rebuild + redeploy the site from the last committed pipeline state. Fast -- use after editing css/js/html/worker files."
+        description: "Styles/UI only: skip the data"
         type: boolean
         default: false
 permissions:
