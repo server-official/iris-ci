@@ -8,6 +8,10 @@ on:
         description: "Force Wayback historical TLE backfill (slow, only needed once per new N2YO satellite)"
         type: boolean
         default: false
+      styles_only:
+        description: "Styles/UI only: skip the data refresh (TLE fetch, RPO pipeline, GNSS, Telegram alerts, git push) and just rebuild + redeploy the site from the last committed pipeline state. Fast -- use after editing css/js/html/worker files."
+        type: boolean
+        default: false
 permissions:
   contents: write   # to push refreshed pipeline state back to the PRIVATE repo
 concurrency:
@@ -46,14 +50,25 @@ jobs:
       - name: Install Python dependencies
         working-directory: private
         run: pip install -r requirements.txt
+      # STYLES-ONLY RUNS (workflow_dispatch -> "styles_only" = true):
+      #   steps 3, 4a, 4b and 5 below are skipped, so nothing is re-fetched,
+      #   re-analysed, alerted on or pushed. Step 4 (export) still runs -- it only
+      #   READS the pipeline state already committed to the private repo -- because
+      #   the Worker deploy replaces the whole asset bundle and the site needs
+      #   public_data.json etc. in it. The deployed data is therefore exactly as
+      #   fresh as the last full run; only your site/ + worker/ changes are new.
+      #   Scheduled (repository_dispatch) runs never set the input, so they always
+      #   do the full run.
       # 3. Run the actual sensitive pipeline -- USING THIS REPO'S (public,
       #    free) Actions minutes, not the private repo's.
       - name: Fetch current N2YO TLE data
+        if: ${{ github.event.inputs.styles_only != 'true' }}
         working-directory: private
         env:
           N2YO_API_KEY: ${{ secrets.N2YO_API_KEY }}
         run: python fetch_tle.py
       - name: Run RPO analysis pipeline
+        if: ${{ github.event.inputs.styles_only != 'true' }}
         working-directory: private
         env:
           PYTHONUNBUFFERED: "1"
@@ -94,6 +109,7 @@ jobs:
       #     whole gpsjam archive).  Each source is isolated inside `python -m gnss.run`, so one provider being down
       #     never blocks the deploy.  continue-on-error: the other modes must always ship.
       - name: Build GNSS interference datasets
+        if: ${{ github.event.inputs.styles_only != 'true' }}
         working-directory: private
         continue-on-error: true
         env:
@@ -116,6 +132,7 @@ jobs:
       #     continue-on-error: a Telegram hiccup must never block the deploy.
        
       - name: Early Warning manoeuvre notifications (Telegram)
+        if: ${{ github.event.inputs.styles_only != 'true' }}
         working-directory: private
         continue-on-error: true
         env:
@@ -129,6 +146,7 @@ jobs:
       #    minutes as long as the private repo's own workflow no longer
       #    listens on `push` (see SETUP.md, step 2).
       - name: Commit and push updated state to the private repo
+        if: ${{ github.event.inputs.styles_only != 'true' }}
         working-directory: private
         run: |
           git config user.name "tracker-bot"
